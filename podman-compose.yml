@@ -1,5 +1,8 @@
 version: '3.8'
 
+# Podman-optimized compose file for Developer Memory Layer
+# Enhanced with Podman-specific features and security improvements
+
 services:
   # Frontend
   frontend:
@@ -11,8 +14,23 @@ services:
     depends_on:
       - api-gateway
     volumes:
-      - .:/app
+      - .:/app:Z  # SELinux label for better security
       - /app/node_modules
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # Podman security enhancements
+    security_opt:
+      - label=type:container_runtime_t
+    user: 1000:1000  # Run as non-root user
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
 
   # API Gateway
   api-gateway:
@@ -29,6 +47,21 @@ services:
       - redis
       - memory-service
       - search-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # Podman security enhancements
+    security_opt:
+      - label=type:container_runtime_t
+    user: 1000:1000
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
 
   # Memory Service
   memory-service:
@@ -42,6 +75,21 @@ services:
     depends_on:
       - db
       - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # Podman security enhancements
+    security_opt:
+      - label=type:container_runtime_t
+    user: 1000:1000
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
 
   # Search Service
   search-service:
@@ -56,6 +104,21 @@ services:
       - NODE_ENV=development
     depends_on:
       - db
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # Podman security enhancements
+    security_opt:
+      - label=type:container_runtime_t
+    user: 1000:1000
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
 
   # Integration Service
   integration-service:
@@ -72,6 +135,21 @@ services:
       - NODE_ENV=development
     depends_on:
       - db
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # Podman security enhancements
+    security_opt:
+      - label=type:container_runtime_t
+    user: 1000:1000
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
 
   # PostgreSQL Database
   db:
@@ -83,8 +161,36 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./backend/database/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - postgres_data:/var/lib/postgresql/data:Z
+      - ./backend/database/init.sql:/docker-entrypoint-initdb.d/init.sql:Z
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    # Database-specific security
+    security_opt:
+      - label=type:container_runtime_t
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+    # Postgres performance tuning
+    command: [
+      "postgres",
+      "-c", "shared_preload_libraries=pg_stat_statements",
+      "-c", "max_connections=200",
+      "-c", "shared_buffers=256MB",
+      "-c", "effective_cache_size=1GB",
+      "-c", "maintenance_work_mem=64MB",
+      "-c", "checkpoint_completion_target=0.9",
+      "-c", "wal_buffers=16MB",
+      "-c", "default_statistics_target=100",
+      "-c", "random_page_cost=1.1",
+      "-c", "effective_io_concurrency=200"
+    ]
 
   # Redis Cache
   redis:
@@ -92,7 +198,27 @@ services:
     ports:
       - "6379:6379"
     volumes:
-      - redis_data:/data
+      - redis_data:/data:Z
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    # Redis security and performance
+    security_opt:
+      - label=type:container_runtime_t
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+    command: [
+      "redis-server",
+      "--appendonly", "yes",
+      "--maxmemory", "200mb",
+      "--maxmemory-policy", "allkeys-lru"
+    ]
 
   # pgAdmin (Database Management)
   pgadmin:
@@ -100,11 +226,63 @@ services:
     environment:
       - PGADMIN_DEFAULT_EMAIL=admin@example.com
       - PGADMIN_DEFAULT_PASSWORD=admin
+      - PGADMIN_CONFIG_SERVER_MODE=False
+      - PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED=False
     ports:
       - "5050:80"
     depends_on:
       - db
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin:Z
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/misc/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    # pgAdmin security
+    security_opt:
+      - label=type:container_runtime_t
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
 
 volumes:
   postgres_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/data/postgres
   redis_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/data/redis
+  pgadmin_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/data/pgadmin
+
+# Podman-specific network configuration
+networks:
+  default:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: memory-layer-br0
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+          gateway: 172.20.0.1
+
+# Labels for better organization
+x-common-labels: &common-labels
+  app: developer-memory-layer
+  environment: development
+  runtime: podman
+  version: "1.0"
