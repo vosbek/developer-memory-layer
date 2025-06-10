@@ -4,8 +4,10 @@
 
 ### Prerequisites
 - **Node.js 18+** - [Download here](https://nodejs.org/)
-- **Docker & Docker Compose** - [Download here](https://docs.docker.com/get-docker/)
+- **Podman & Podman Compose** - [Installation guide](https://podman.io/getting-started/installation) ⭐ **Recommended**
 - **Git** - [Download here](https://git-scm.com/)
+
+> **Why Podman?** Podman offers better security with rootless containers, no daemon dependency, and seamless Docker compatibility. [Learn more](./PODMAN-SETUP.md)
 
 ### 1. Clone and Setup
 
@@ -19,12 +21,34 @@ cp .env.example .env
 
 # Edit your environment variables
 # Add your API keys for integrations (optional for basic usage)
+nano .env
 ```
 
-### 2. Run with Docker (Recommended)
+### 2. Run with Podman (Recommended)
 
 ```bash
-# Start all services
+# Start all services with Podman
+podman-compose -f podman-compose.yml up -d
+
+# Check status
+podman-compose -f podman-compose.yml ps
+
+# View logs
+podman-compose -f podman-compose.yml logs -f
+
+# Stop services
+podman-compose -f podman-compose.yml down
+```
+
+**🎉 That's it!** Your app will be running at:
+- **Frontend**: http://localhost:3000
+- **API**: http://localhost:4000
+- **Database Admin**: http://localhost:5050 (admin@example.com / admin)
+
+### 3. Alternative: Docker (Legacy Support)
+
+```bash
+# Start all services with Docker
 docker-compose up -d
 
 # Check status
@@ -34,12 +58,7 @@ docker-compose ps
 docker-compose logs -f
 ```
 
-**🎉 That's it!** Your app will be running at:
-- **Frontend**: http://localhost:3000
-- **API**: http://localhost:4000
-- **Database Admin**: http://localhost:5050 (admin@example.com / admin)
-
-### 3. Alternative: Local Development
+### 4. Alternative: Local Development
 
 ```bash
 # Install frontend dependencies
@@ -97,7 +116,7 @@ PINECONE_ENVIRONMENT=your_pinecone_env
 ## Company-Wide Deployment (Enterprise)
 
 ### Architecture for Enterprise
-- **Kubernetes orchestration**
+- **Kubernetes orchestration** (using Podman-generated YAML)
 - **Multi-tenant architecture**
 - **Enterprise SSO integration** (SAML, OAuth)
 - **Advanced analytics and insights**
@@ -110,11 +129,14 @@ PINECONE_ENVIRONMENT=your_pinecone_env
 - **API rate limiting and monitoring**
 - **Audit logging and GDPR compliance**
 
-### Kubernetes Deployment
+### Kubernetes Deployment with Podman
 
 ```bash
+# Generate Kubernetes YAML from Podman
+podman generate kube memory-layer-pod > k8s/memory-layer.yaml
+
 # Deploy to Kubernetes cluster
-kubectl apply -f k8s/
+kubectl apply -f k8s/memory-layer.yaml
 
 # Monitor deployment
 kubectl get pods -n memory-layer
@@ -150,8 +172,8 @@ cd backend/memory-service  # or whichever service
 # Test locally
 npm test
 
-# Test integration
-docker-compose up --build
+# Test integration with Podman
+podman-compose -f podman-compose.yml up --build
 
 # Commit and push
 git add .
@@ -166,9 +188,52 @@ git push origin feature/new-awesome-feature
 cd backend/database
 ./create-migration.sh "add_new_table"
 
-# Apply migrations
-docker-compose exec db psql -U postgres -d memory_layer -f /migrations/001_add_new_table.sql
+# Apply migrations with Podman
+podman-compose -f podman-compose.yml exec db psql -U postgres -d memory_layer -f /migrations/001_add_new_table.sql
 ```
+
+## Migration from Docker to Podman
+
+### Quick Migration Script
+
+```bash
+#!/bin/bash
+# migrate-to-podman.sh
+
+echo "🚀 Migrating Developer Memory Layer to Podman..."
+
+# Stop existing Docker containers
+echo "Stopping Docker containers..."
+docker-compose down
+
+# Export Docker volumes (if needed)
+echo "Creating volume backups..."
+mkdir -p ./backups
+docker run --rm -v developer-memory-layer_postgres_data:/data -v $(pwd)/backups:/backup alpine tar czf /backup/postgres_data.tar.gz -C /data .
+docker run --rm -v developer-memory-layer_redis_data:/data -v $(pwd)/backups:/backup alpine tar czf /backup/redis_data.tar.gz -C /data .
+
+# Start with Podman
+echo "Starting services with Podman..."
+podman-compose -f podman-compose.yml up -d
+
+# Import volumes if needed
+if [ -f "./backups/postgres_data.tar.gz" ]; then
+    echo "Restoring PostgreSQL data..."
+    podman volume create postgres_data
+    podman run --rm -v postgres_data:/data -v $(pwd)/backups:/backup alpine tar xzf /backup/postgres_data.tar.gz -C /data
+fi
+
+echo "✅ Migration complete! Your app is now running with Podman."
+echo "Frontend: http://localhost:3000"
+echo "API: http://localhost:4000"
+```
+
+### Manual Migration Steps
+
+1. **Stop Docker services**: `docker-compose down`
+2. **Install Podman**: Follow [installation guide](https://podman.io/getting-started/installation)
+3. **Start with Podman**: `podman-compose -f podman-compose.yml up -d`
+4. **Verify services**: `podman-compose -f podman-compose.yml ps`
 
 ## Monitoring and Maintenance
 
@@ -179,8 +244,8 @@ docker-compose exec db psql -U postgres -d memory_layer -f /migrations/001_add_n
 
 ### Backup Strategy
 ```bash
-# Database backup
-docker-compose exec db pg_dump -U postgres memory_layer > backup_$(date +%Y%m%d).sql
+# Database backup with Podman
+podman-compose -f podman-compose.yml exec db pg_dump -U postgres memory_layer > backup_$(date +%Y%m%d).sql
 
 # Automated backups (add to cron)
 0 2 * * * /path/to/backup-script.sh
@@ -189,7 +254,8 @@ docker-compose exec db pg_dump -U postgres memory_layer > backup_$(date +%Y%m%d)
 ### Performance Monitoring
 - **Application metrics**: Built-in Express middleware
 - **Database performance**: pgAdmin queries
-- **System resources**: Docker stats
+- **System resources**: `podman stats`
+- **Container health**: `podman healthcheck run <container>`
 
 ## Troubleshooting
 
@@ -198,14 +264,14 @@ docker-compose exec db pg_dump -U postgres memory_layer > backup_$(date +%Y%m%d)
 **🔴 Database connection failed**
 ```bash
 # Check if PostgreSQL is running
-docker-compose ps db
+podman-compose -f podman-compose.yml ps db
 
 # Check logs
-docker-compose logs db
+podman-compose -f podman-compose.yml logs db
 
 # Reset database
-docker-compose down -v
-docker-compose up -d
+podman-compose -f podman-compose.yml down -v
+podman-compose -f podman-compose.yml up -d
 ```
 
 **🔴 Frontend can't connect to API**
@@ -220,16 +286,25 @@ curl http://localhost:4000/health
 **🔴 Search not working**
 ```bash
 # Check if vector database is configured
-docker-compose logs search-service
+podman-compose -f podman-compose.yml logs search-service
 
 # Ensure OpenAI API key is set
 echo $OPENAI_API_KEY
 ```
 
+**🔴 Podman permission issues**
+```bash
+# Fix volume permissions for rootless Podman
+podman unshare chown -R 1000:1000 ~/.local/share/containers/storage/volumes/
+
+# Or use :Z flag for SELinux
+podman run -v ./data:/data:Z postgres:15
+```
+
 ### Getting Help
 
-1. **Check the logs**: `docker-compose logs [service-name]`
-2. **Review the documentation**: [/docs](./docs/)
+1. **Check the logs**: `podman-compose -f podman-compose.yml logs [service-name]`
+2. **Review the documentation**: [Podman Setup Guide](./PODMAN-SETUP.md)
 3. **Open an issue**: [GitHub Issues](https://github.com/vosbek/developer-memory-layer/issues)
 4. **Join our Discord**: [Community Link](#) (coming soon)
 
@@ -243,6 +318,13 @@ echo $OPENAI_API_KEY
 
 ## Security Considerations
 
+### Podman Security Benefits
+- **Rootless containers**: Better security by default
+- **No daemon**: Direct container execution
+- **SELinux integration**: Enhanced access control
+- **User namespaces**: Isolated container users
+
+### General Security
 - **Environment Variables**: Never commit API keys to git
 - **Database Security**: Use strong passwords and connection encryption
 - **API Security**: Implement proper rate limiting and authentication
@@ -251,4 +333,6 @@ echo $OPENAI_API_KEY
 
 ---
 
-**💡 Pro Tip**: Start with the Docker setup for the fastest way to get everything running, then gradually move to individual service development as you customize the system!
+**💡 Pro Tip**: Podman provides all the benefits of Docker with enhanced security and no daemon dependency. The migration is seamless - just replace `docker-compose` with `podman-compose`!
+
+**🔄 Migrating from Docker?** See our [detailed migration guide](./PODMAN-SETUP.md#migration-from-docker) for step-by-step instructions.
